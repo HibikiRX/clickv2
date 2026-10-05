@@ -43,13 +43,9 @@
 <body>
 <main id="app"></main>
 
+<script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-/* Renseigne ces deux valeurs (Supabase > Project Settings > API). La clé anon est publique par conception :
-   la sécurité repose sur les règles RLS de supabase.sql. */
-const SUPABASE_URL = '';
-const SUPABASE_ANON_KEY = '';
-
 const app = document.getElementById('app');
 const sb = SUPABASE_URL && SUPABASE_ANON_KEY ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -61,7 +57,7 @@ const $ = id => document.getElementById(id);
 
 async function render() {
   if (!sb) return view(`<h1>ngl-copy</h1><p class="sub">Configuration requise</p>
-    <div class="card"><div class="head">Renseigne SUPABASE_URL et SUPABASE_ANON_KEY dans index.html, puis exécute supabase.sql.</div></div>`);
+    <div class="card"><div class="head">Renseigne SUPABASE_URL et SUPABASE_ANON_KEY dans config.js, puis exécute supabase.sql.</div></div>`);
   const [, route, arg] = location.hash.split('/');
   if (route === 'u' && arg) return sendView(clean(arg));
   if (route === 'inbox') return inboxView();
@@ -71,8 +67,8 @@ async function render() {
 async function homeView() {
   const { data: { session } } = await sb.auth.getSession();
   if (session) {
-    const { data: p } = await sb.from('profiles').select('username').eq('id', session.user.id).maybeSingle();
-    if (p) return linkView(p.username);
+    const { data: p } = await sb.from('profiles').select('username,question').eq('id', session.user.id).maybeSingle();
+    if (p) return linkView(p.username, p.question, session.user.id);
   }
   view(`<h1>ngl-copy</h1><p class="sub">reçois des messages anonymes de tes amis</p>
     <div class="card"><div class="head">Crée ton compte ou connecte-toi</div>
@@ -101,14 +97,23 @@ async function homeView() {
   };
 }
 
-function linkView(u) {
+function linkView(u, question, uid) {
   const link = `${base()}#/u/${u}`;
   view(`<h1>@${esc(u)}</h1><p class="sub">partage ce lien dans ta bio 👇</p>
     <div class="link">${esc(link)}</div>
     <button id="copy">Copier le lien</button>
+    <div class="card" style="margin-top:14px"><div class="head">Ta question</div>
+      <input type="text" id="q" maxlength="80" value="${esc(question)}"></div>
+    <button class="ghost" id="saveq">Enregistrer la question</button>
     <button class="ghost" onclick="go('#/inbox')">Voir mes messages</button>
     <button class="ghost" id="out">Se déconnecter</button>`);
   $('copy').onclick = e => { navigator.clipboard?.writeText(link); e.target.textContent = 'Copié ✓'; };
+  $('saveq').onclick = async e => {
+    const q = $('q').value.trim();
+    if (!q) return;
+    const { error } = await sb.from('profiles').update({ question: q }).eq('id', uid);
+    e.target.textContent = error ? 'Erreur' : 'Enregistré ✓';
+  };
   $('out').onclick = async () => { await sb.auth.signOut(); homeView(); };
 }
 
