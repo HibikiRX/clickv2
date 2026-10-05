@@ -1,4 +1,4 @@
-// Supabase > Project Settings > API. La clé anon/publishable est publique par conception :
+// Supabase > Project Settings > API. La clé publishable est publique par conception :
 // la sécurité repose sur les règles RLS de supabase.sql.
-const SUPABASE_URL = 'https://rkuvnimnhwefksawucwo.supabase.co';
-const SUPABASE_ANON_KEY = '';
+const SUPABASE_URL = 'https://zyodxrakwwzuoxxtentp.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_BpETOuc_jX8ajDizp727EQ_B2EXVv-A';
