@@ -18,11 +18,11 @@
   .card { background:#fff; color:var(--ink); border-radius:24px; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,.2); margin-bottom:16px; }
   .card .head { background:rgba(0,0,0,.06); padding:14px 18px; font-weight:700; font-size:.95rem; }
   .card .head small { display:block; font-weight:400; opacity:.6; }
-  textarea, input[type=text] {
+  textarea, input[type=text], input[type=password] {
     width:100%; border:0; outline:0; font:inherit; padding:18px; resize:none; background:#fff; color:var(--ink);
   }
   textarea { height:120px; font-size:1.15rem; }
-  input[type=text] { font-size:1.1rem; border-top:1px solid #eee; }
+  input[type=text], input[type=password] { font-size:1.1rem; border-top:1px solid #eee; }
   button {
     width:100%; border:0; border-radius:999px; padding:16px; font:inherit; font-weight:800; font-size:1.1rem;
     background:var(--ink); color:#fff; cursor:pointer;
@@ -35,6 +35,7 @@
   .msg time { display:block; font-size:.72rem; opacity:.5; margin-top:6px; }
   .empty { text-align:center; opacity:.9; padding:24px 0; }
   .link { background:rgba(0,0,0,.25); border-radius:14px; padding:12px; word-break:break-all; font-size:.85rem; margin:10px 0; }
+  .msg .del { width:auto; padding:6px 12px; font-size:.8rem; margin-top:8px; background:#eee; color:#333; }
   .hide { display:none; }
   a { color:#fff; }
 </style>
@@ -42,84 +43,113 @@
 <body>
 <main id="app"></main>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-/* Démo 100 % côté navigateur : les messages sont stockés dans localStorage.
-   Pour de vrais messages entre appareils, il faut un backend (voir README ci-dessous). */
+/* Renseigne ces deux valeurs (Supabase > Project Settings > API). La clé anon est publique par conception :
+   la sécurité repose sur les règles RLS de supabase.sql. */
+const SUPABASE_URL = '';
+const SUPABASE_ANON_KEY = '';
+
 const app = document.getElementById('app');
-const KEY = 'nglcopy:';
-const load = u => { try { return JSON.parse(localStorage.getItem(KEY + u)) || []; } catch { return []; } };
-const save = (u, m) => localStorage.setItem(KEY + u, JSON.stringify(m));
-const esc = s => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const sb = SUPABASE_URL && SUPABASE_ANON_KEY ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const clean = s => s.toLowerCase().replace(/[^a-z0-9_.]/g, '').slice(0, 20);
 const base = () => location.href.split('#')[0];
+const go = h => { location.hash = h; };
+const view = html => { app.innerHTML = html; };
+const $ = id => document.getElementById(id);
 
-const QUESTIONS = ["envoie-moi des messages anonymes !", "dis-moi un secret 🤫", "ce que tu penses vraiment de moi ?", "pose-moi une question 👀"];
-
-function render() {
-  const [, route, user] = location.hash.split('/');
-  if (route === 'u' && user) return sendView(clean(user));
-  if (route === 'inbox' && user) return inboxView(clean(user));
-  homeView();
+async function render() {
+  if (!sb) return view(`<h1>ngl-copy</h1><p class="sub">Configuration requise</p>
+    <div class="card"><div class="head">Renseigne SUPABASE_URL et SUPABASE_ANON_KEY dans index.html, puis exécute supabase.sql.</div></div>`);
+  const [, route, arg] = location.hash.split('/');
+  if (route === 'u' && arg) return sendView(clean(arg));
+  if (route === 'inbox') return inboxView();
+  return homeView();
 }
 
-function homeView() {
-  app.innerHTML = `
-    <h1>ngl-copy</h1>
-    <p class="sub">reçois des messages anonymes de tes amis</p>
-    <div class="card">
-      <div class="head">Choisis ton pseudo</div>
-      <input type="text" id="name" placeholder="ton_pseudo" maxlength="20" autocomplete="off">
+async function homeView() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) {
+    const { data: p } = await sb.from('profiles').select('username').eq('id', session.user.id).maybeSingle();
+    if (p) return linkView(p.username);
+  }
+  view(`<h1>ngl-copy</h1><p class="sub">reçois des messages anonymes de tes amis</p>
+    <div class="card"><div class="head">Crée ton compte ou connecte-toi</div>
+      <input type="text" id="name" placeholder="pseudo (inscription uniquement)" maxlength="20" autocomplete="username">
+      <input type="text" id="email" placeholder="email" autocomplete="email">
+      <input type="password" id="pw" placeholder="mot de passe (8+ caractères)" autocomplete="current-password">
     </div>
-    <button id="go">Obtenir mon lien</button>
-    <div id="out"></div>`;
-  document.getElementById('go').onclick = () => {
-    const u = clean(document.getElementById('name').value);
-    if (!u) return;
-    const link = `${base()}#/u/${u}`;
-    document.getElementById('out').innerHTML = `
-      <p class="note">Partage ce lien dans ta bio 👇</p>
-      <div class="link">${esc(link)}</div>
-      <button id="copy">Copier le lien</button>
-      <button class="ghost" onclick="location.hash='#/inbox/${u}'">Voir mes messages (${load(u).length})</button>`;
-    document.getElementById('copy').onclick = e => {
-      navigator.clipboard?.writeText(link); e.target.textContent = 'Copié ✓';
-    };
+    <p class="note" id="err"></p>
+    <button id="signup">Créer mon lien</button>
+    <button class="ghost" id="signin">Me connecter</button>`);
+  const err = m => { $('err').textContent = m; };
+  const creds = () => ({ email: $('email').value.trim(), password: $('pw').value });
+  $('signin').onclick = async () => {
+    const { error } = await sb.auth.signInWithPassword(creds());
+    error ? err(error.message) : homeView();
+  };
+  $('signup').onclick = async () => {
+    const u = clean($('name').value);
+    if (u.length < 3) return err('Pseudo : 3 à 20 caractères (a-z, 0-9, _ .)');
+    const { data, error } = await sb.auth.signUp(creds());
+    if (error) return err(error.message);
+    if (!data.session) return err('Compte créé : confirme ton email puis connecte-toi.');
+    const { error: e2 } = await sb.from('profiles').insert({ id: data.user.id, username: u });
+    if (e2) { await sb.auth.signOut(); return err(e2.code === '23505' ? 'Pseudo déjà pris.' : e2.message); }
+    homeView();
   };
 }
 
-function sendView(u) {
-  const q = QUESTIONS[u.length % QUESTIONS.length];
-  app.innerHTML = `
-    <h1>@${esc(u)}</h1>
-    <p class="sub">🔒 anonyme</p>
-    <div class="card">
-      <div class="head">${esc(q)}<small>q&amp;a anonyme</small></div>
-      <textarea id="txt" placeholder="envoie un message anonyme…" maxlength="300"></textarea>
-    </div>
-    <p class="note">🔒 anonyme · @${esc(u)} ne saura pas qui tu es</p>
+function linkView(u) {
+  const link = `${base()}#/u/${u}`;
+  view(`<h1>@${esc(u)}</h1><p class="sub">partage ce lien dans ta bio 👇</p>
+    <div class="link">${esc(link)}</div>
+    <button id="copy">Copier le lien</button>
+    <button class="ghost" onclick="go('#/inbox')">Voir mes messages</button>
+    <button class="ghost" id="out">Se déconnecter</button>`);
+  $('copy').onclick = e => { navigator.clipboard?.writeText(link); e.target.textContent = 'Copié ✓'; };
+  $('out').onclick = async () => { await sb.auth.signOut(); homeView(); };
+}
+
+async function sendView(u) {
+  const { data: p } = await sb.from('profiles').select('username,question').eq('username', u).maybeSingle();
+  if (!p) return view(`<h1>Introuvable</h1><p class="sub">@${esc(u)} n'existe pas.</p><button onclick="go('#/')">Accueil</button>`);
+  view(`<h1>@${esc(p.username)}</h1><p class="sub">🔒 anonyme</p>
+    <div class="card"><div class="head">${esc(p.question)}<small>q&amp;a anonyme</small></div>
+      <textarea id="txt" placeholder="envoie un message anonyme…" maxlength="300"></textarea></div>
+    <p class="note" id="err">🔒 anonyme · @${esc(p.username)} ne saura pas qui tu es</p>
     <button id="send">Envoyer !</button>
-    <button class="ghost" onclick="location.hash='#/'">Je veux mon propre lien</button>`;
-  document.getElementById('send').onclick = () => {
-    const t = document.getElementById('txt').value.trim();
+    <button class="ghost" onclick="go('#/')">Je veux mon propre lien</button>`);
+  $('send').onclick = async () => {
+    const t = $('txt').value.trim();
     if (!t) return;
-    const m = load(u); m.unshift({ t, d: Date.now() }); save(u, m);
-    app.innerHTML = `<h1>Envoyé ! 🎉</h1><p class="sub">ton message est parti, anonymement.</p>
-      <button onclick="location.hash='#/u/${u}'">Envoyer un autre</button>
-      <button class="ghost" onclick="location.hash='#/'">Obtenir mon lien</button>`;
+    const last = +localStorage.getItem('ngl:last') || 0;
+    if (Date.now() - last < 5000) return ($('err').textContent = 'Doucement, réessaie dans quelques secondes.');
+    $('send').disabled = true;
+    const { error } = await sb.rpc('send_message', { p_username: u, p_body: t });
+    $('send').disabled = false;
+    if (error) return ($('err').textContent = error.message.includes('rate') ? 'Trop de messages, réessaie plus tard.' : 'Envoi impossible.');
+    localStorage.setItem('ngl:last', Date.now());
+    view(`<h1>Envoyé ! 🎉</h1><p class="sub">ton message est parti, anonymement.</p>
+      <button onclick="sendView('${u}')">Envoyer un autre</button>
+      <button class="ghost" onclick="go('#/')">Obtenir mon lien</button>`);
   };
 }
 
-function inboxView(u) {
-  const m = load(u);
-  app.innerHTML = `
-    <h1>Messages de @${esc(u)}</h1>
-    <p class="sub">${m.length} message${m.length > 1 ? 's' : ''}</p>
-    ${m.length ? m.map(x => `<div class="msg">${esc(x.t)}<time>${new Date(x.d).toLocaleString('fr-FR')}</time></div>`).join('')
+async function inboxView() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) return go('#/');
+  const { data: m, error } = await sb.from('messages').select('id,body,created_at').order('created_at', { ascending: false });
+  if (error) return view(`<h1>Erreur</h1><p class="sub">${esc(error.message)}</p>`);
+  view(`<h1>Mes messages</h1><p class="sub">${m.length} message${m.length > 1 ? 's' : ''}</p>
+    ${m.length ? m.map(x => `<div class="msg">${esc(x.body)}<time>${new Date(x.created_at).toLocaleString('fr-FR')}</time>
+        <button class="ghost del" data-id="${x.id}">Supprimer</button></div>`).join('')
                : '<div class="empty">Rien pour l’instant… partage ton lien !</div>'}
-    <button class="ghost" onclick="location.hash='#/'">Accueil</button>
-    ${m.length ? '<button class="ghost" id="clr">Tout effacer</button>' : ''}`;
-  const c = document.getElementById('clr');
-  if (c) c.onclick = () => { if (confirm('Tout effacer ?')) { save(u, []); inboxView(u); } };
+    <button class="ghost" onclick="go('#/')">Accueil</button>`);
+  document.querySelectorAll('.del').forEach(b => b.onclick = async () => {
+    await sb.from('messages').delete().eq('id', b.dataset.id); inboxView();
+  });
 }
 
 addEventListener('hashchange', render);
