@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ngl-copy – messages anonymes</title>
+<style>
+  :root { --a:#ff6b35; --b:#f7197c; --ink:#111; }
+  * { box-sizing: border-box; }
+  body {
+    margin:0; min-height:100vh; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: linear-gradient(160deg, var(--a), var(--b)); color:#fff;
+    display:flex; justify-content:center; align-items:flex-start; padding:24px 16px;
+  }
+  main { width:100%; max-width:420px; }
+  h1 { font-size:2rem; text-align:center; margin:8px 0 4px; letter-spacing:-1px; }
+  .sub { text-align:center; opacity:.9; margin:0 0 20px; }
+  .card { background:#fff; color:var(--ink); border-radius:24px; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,.2); margin-bottom:16px; }
+  .card .head { background:rgba(0,0,0,.06); padding:14px 18px; font-weight:700; font-size:.95rem; }
+  .card .head small { display:block; font-weight:400; opacity:.6; }
+  textarea, input[type=text] {
+    width:100%; border:0; outline:0; font:inherit; padding:18px; resize:none; background:#fff; color:var(--ink);
+  }
+  textarea { height:120px; font-size:1.15rem; }
+  input[type=text] { font-size:1.1rem; border-top:1px solid #eee; }
+  button {
+    width:100%; border:0; border-radius:999px; padding:16px; font:inherit; font-weight:800; font-size:1.1rem;
+    background:var(--ink); color:#fff; cursor:pointer;
+  }
+  button:active { transform:scale(.98); }
+  button.ghost { background:rgba(255,255,255,.2); margin-top:10px; }
+  .pad { padding:0 0 0; }
+  .note { text-align:center; font-size:.8rem; opacity:.85; margin:10px 0 18px; }
+  .msg { background:#fff; color:var(--ink); border-radius:18px; padding:14px 16px; margin-bottom:10px; box-shadow:0 4px 14px rgba(0,0,0,.15); }
+  .msg time { display:block; font-size:.72rem; opacity:.5; margin-top:6px; }
+  .empty { text-align:center; opacity:.9; padding:24px 0; }
+  .link { background:rgba(0,0,0,.25); border-radius:14px; padding:12px; word-break:break-all; font-size:.85rem; margin:10px 0; }
+  .hide { display:none; }
+  a { color:#fff; }
+</style>
+</head>
+<body>
+<main id="app"></main>
+
+<script>
+/* Démo 100 % côté navigateur : les messages sont stockés dans localStorage.
+   Pour de vrais messages entre appareils, il faut un backend (voir README ci-dessous). */
+const app = document.getElementById('app');
+const KEY = 'nglcopy:';
+const load = u => { try { return JSON.parse(localStorage.getItem(KEY + u)) || []; } catch { return []; } };
+const save = (u, m) => localStorage.setItem(KEY + u, JSON.stringify(m));
+const esc = s => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const clean = s => s.toLowerCase().replace(/[^a-z0-9_.]/g, '').slice(0, 20);
+const base = () => location.href.split('#')[0];
+
+const QUESTIONS = ["envoie-moi des messages anonymes !", "dis-moi un secret 🤫", "ce que tu penses vraiment de moi ?", "pose-moi une question 👀"];
+
+function render() {
+  const [, route, user] = location.hash.split('/');
+  if (route === 'u' && user) return sendView(clean(user));
+  if (route === 'inbox' && user) return inboxView(clean(user));
+  homeView();
+}
+
+function homeView() {
+  app.innerHTML = `
+    <h1>ngl-copy</h1>
+    <p class="sub">reçois des messages anonymes de tes amis</p>
+    <div class="card">
+      <div class="head">Choisis ton pseudo</div>
+      <input type="text" id="name" placeholder="ton_pseudo" maxlength="20" autocomplete="off">
+    </div>
+    <button id="go">Obtenir mon lien</button>
+    <div id="out"></div>`;
+  document.getElementById('go').onclick = () => {
+    const u = clean(document.getElementById('name').value);
+    if (!u) return;
+    const link = `${base()}#/u/${u}`;
+    document.getElementById('out').innerHTML = `
+      <p class="note">Partage ce lien dans ta bio 👇</p>
+      <div class="link">${esc(link)}</div>
+      <button id="copy">Copier le lien</button>
+      <button class="ghost" onclick="location.hash='#/inbox/${u}'">Voir mes messages (${load(u).length})</button>`;
+    document.getElementById('copy').onclick = e => {
+      navigator.clipboard?.writeText(link); e.target.textContent = 'Copié ✓';
+    };
+  };
+}
+
+function sendView(u) {
+  const q = QUESTIONS[u.length % QUESTIONS.length];
+  app.innerHTML = `
+    <h1>@${esc(u)}</h1>
+    <p class="sub">🔒 anonyme</p>
+    <div class="card">
+      <div class="head">${esc(q)}<small>q&amp;a anonyme</small></div>
+      <textarea id="txt" placeholder="envoie un message anonyme…" maxlength="300"></textarea>
+    </div>
+    <p class="note">🔒 anonyme · @${esc(u)} ne saura pas qui tu es</p>
+    <button id="send">Envoyer !</button>
+    <button class="ghost" onclick="location.hash='#/'">Je veux mon propre lien</button>`;
+  document.getElementById('send').onclick = () => {
+    const t = document.getElementById('txt').value.trim();
+    if (!t) return;
+    const m = load(u); m.unshift({ t, d: Date.now() }); save(u, m);
+    app.innerHTML = `<h1>Envoyé ! 🎉</h1><p class="sub">ton message est parti, anonymement.</p>
+      <button onclick="location.hash='#/u/${u}'">Envoyer un autre</button>
+      <button class="ghost" onclick="location.hash='#/'">Obtenir mon lien</button>`;
+  };
+}
+
+function inboxView(u) {
+  const m = load(u);
+  app.innerHTML = `
+    <h1>Messages de @${esc(u)}</h1>
+    <p class="sub">${m.length} message${m.length > 1 ? 's' : ''}</p>
+    ${m.length ? m.map(x => `<div class="msg">${esc(x.t)}<time>${new Date(x.d).toLocaleString('fr-FR')}</time></div>`).join('')
+               : '<div class="empty">Rien pour l’instant… partage ton lien !</div>'}
+    <button class="ghost" onclick="location.hash='#/'">Accueil</button>
+    ${m.length ? '<button class="ghost" id="clr">Tout effacer</button>' : ''}`;
+  const c = document.getElementById('clr');
+  if (c) c.onclick = () => { if (confirm('Tout effacer ?')) { save(u, []); inboxView(u); } };
+}
+
+addEventListener('hashchange', render);
+render();
+</script>
+</body>
+</html>
